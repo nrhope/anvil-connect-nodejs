@@ -59,7 +59,6 @@ module.exports = {
 
   clients: undefined,
 
-
   /**
    * Client Configuration Setter
    */
@@ -183,6 +182,35 @@ module.exports = {
     return uri + FormUrlencoded.encode(params);
   },
 
+  /** Send callback response unchanged to anvil-connect. */
+  authorize_proxy: function (options) {
+    var anvil   = this
+        , options = options || {}
+        ;
+
+    options.endpoint = options.endpoint || 'connect/' + options.provider;
+    return function (req, res, next) {
+      var path     = '/' + options.endpoint,// + '/callback',
+          params = req.query;
+
+
+      var std_params = { // @TODO: should have entry EP in anvil-connect that doesn't need these, except maybe client_id
+        response_type: options.responseType || anvil.params.responseType || 'code',
+        redirect_uri:  options.redirectUri  || anvil.params.redirectUri,
+        client_id:     options.clientId     || anvil.client.id,
+        scope:         options.scope        || anvil.params.scope || 'openid profile'
+      };
+
+      for (var prop in std_params) {
+        if (std_params.hasOwnProperty(prop)) {
+          params[prop] = std_params[prop];
+        }
+      }
+
+      var srvUrl = anvil.provider.uri + path + '?' +  FormUrlencoded.encode(params);
+      res.redirect(srvUrl);
+    };
+  },
 
   /**
    * Authorize
@@ -199,13 +227,14 @@ module.exports = {
       ;
 
     return function (req, res, next) {
-      res.redirect(anvil.uri({
+      var params = {
         endpoint:     options.endpoint || 'authorize',
         responseType: options.responseType,
         redirectUri:  options.redirectUri,
         clientId:     options.clientId,
         scope:        options.scope
-      }));
+      };
+      res.redirect(anvil.uri(params));
     };
   },
 
@@ -223,6 +252,14 @@ module.exports = {
     return this.authorize(options);
   },
 
+  signout: function (options) {
+    var anvil        = this;
+
+    options = options || {};
+    return function (req, res, next) {
+      res.redirect(anvil.provider.uri + '/signout?' +  FormUrlencoded.encode({ "code": req.query.code }));
+    }
+  },
 
   /**
    * Signup
@@ -246,8 +283,7 @@ module.exports = {
 
   connect: function (options) {
     options = options || {};
-    options.provider = options.provider;
-    options.endpoint = 'connect/' + options.provider;
+    options.endpoint = options.endpoint || 'connect/' + options.provider;
     return this.authorize(options);
   },
 
@@ -296,13 +332,17 @@ module.exports = {
     var tokenRequest = FormUrlencoded.encode({
       grant_type:   'authorization_code',
       redirect_uri:  params.redirectUri,
-      code:          authResponse.code
+      code:          authResponse.code,
+
+      // @TODO: credentials in the Authorization header don't work
+      client_id:     client.id,
+      client_secret: client.token
     });
 
     // exchange authorization code for tokens
     request
       .post(provider.uri + '/token')
-      .set('Authorization', 'Basic ' + credentials)
+      //.set('Authorization', 'Basic ' + credentials)
       .send(tokenRequest)
       .end(function (err, tokenResponse) {
         // superagent error
